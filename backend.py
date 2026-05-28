@@ -24,8 +24,10 @@ from datetime import datetime
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from cobot_reader import read_cobot, HOST, PORT, TIMEOUT
+from cobot_control import CobotController
 
 try:
     from pymodbus.client import ModbusTcpClient
@@ -176,9 +178,22 @@ app = FastAPI(title="Digital Twin — Cobot Backend", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Cobot controller (TLS JSON, port 10001) — lazy connect
+# ---------------------------------------------------------------------------
+controller = CobotController(host="10.5.5.100", cmd_port=10001)
+
+def _ensure() -> CobotController:
+    if not controller.is_connected():
+        controller.connect()
+    return controller
+
+def _resp(r) -> dict:
+    return {"ok": bool(r.success), "errorCode": str(r.error_code), "error": r.error_msg}
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +242,61 @@ async def ws_cobot(websocket: WebSocket) -> None:
     finally:
         state.unsubscribe(q)
         log.info("WebSocket client disconnected. Total: %d", len(state.subscribers))
+
+
+# ---------------------------------------------------------------------------
+# Control endpoints
+# ---------------------------------------------------------------------------
+class JointMove(BaseModel):
+    joints: list[float]
+    speed: float = 15.0
+    relative: bool = False
+
+class CartMove(BaseModel):
+    x: float; y: float; z: float
+    rx: float; ry: float; rz: float
+    speed: float = 20.0
+
+@app.post("/api/cobot/move/joint")
+async def move_joint(cmd: JointMove):
+    if len(cmd.joints) != 6:
+        return {"ok": False, "errorCode": "-1", "error": "joints debe tener 6 valores"}
+    try:
+        r = await asyncio.to_thread(
+            _ensure().move_joint, cmd.joints, cmd.speed, 20.0, cmd.relative)
+        return _resp(r)
+    except Exception as e:
+        return {"ok": False, "errorCode": "-1", "error": f"gateway: {e}"}
+
+@app.post("/api/cobot/move/cartesian")
+async def move_cartesian(cmd: CartMove):
+    try:
+        r = await asyncio.to_thread(
+            _ensure().move_cartesian, cmd.x, cmd.y, cmd.z, cmd.rx, cmd.ry, cmd.rz, cmd.speed)
+        return _resp(r)
+    except Exception as e:
+        return {"ok": False, "errorCode": "-1", "error": f"gateway: {e}"}
+
+@app.post("/api/cobot/stop")
+async def stop():
+    try:
+        return _resp(await asyncio.to_thread(_ensure().stop))
+    except Exception as e:
+        return {"ok": False, "errorCode": "-1", "error": f"gateway: {e}"}
+
+@app.post("/api/cobot/enable")
+async def enable():
+    try:
+        return _resp(await asyncio.to_thread(_ensure().enable_robot))
+    except Exception as e:
+        return {"ok": False, "errorCode": "-1", "error": f"gateway: {e}"}
+
+@app.post("/api/cobot/disable")
+async def disable():
+    try:
+        return _resp(await asyncio.to_thread(_ensure().disable_robot))
+    except Exception as e:
+        return {"ok": False, "errorCode": "-1", "error": f"gateway: {e}"}
 
 
 # ---------------------------------------------------------------------------
