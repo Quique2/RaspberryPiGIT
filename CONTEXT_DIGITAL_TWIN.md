@@ -16,23 +16,59 @@ Implementar un **Digital Twin** de una celda de manufactura Schneider Electric c
 
 ## Red y dispositivos
 
+La RPi y el Cobot Controller son **dual-homed** (presentes en ambas subredes).
+La salida a internet (túnel ngrok) sale por wlan0.
+
 ```
-Internet / WiFi (wlan0)
-        │
-  Raspberry Pi 4 (192.168.1.167 / wlan0  +  10.5.5.200 / eth0)
-        │
-   Ethernet eth0 (10.5.5.x)
-        │
-   ┌────┴────────────────────────────┐
-   │                                 │
-Lexium Cobot Controller         PC Cobot Expert
-10.5.5.100                      10.5.5.101
-│
-├─ Puerto 6502  → Modbus TCP (lectura, FC04)
-├─ Puerto 10000 → Estado JSON en tiempo real (TLS)
-├─ Puerto 10001 → Comandos JSON (TLS) ← CONTROL
-└─ Puerto 2121  → FTP (programas)
+Internet
+   │  wlan0 = 10.22.160.24/20  (WiFi institucional)
+   │
+Raspberry Pi 4 ── eth0 = 192.168.1.167  +  10.5.5.200  (dos IPs en eth0)
+   │
+   ├──────────── Subred 192.168.1.0/24 ────────────┐
+   │                                                │
+   │  192.168.1.1    Router / Gateway (HTTP)        │
+   │  192.168.1.50   PLC Schneider TM262-15 (HTTP/HTTPS)
+   │  192.168.1.167  Raspberry Pi (eth0)            │
+   │  192.168.1.252  Cobot Controller (2ª NIC)      │
+   │                                                │
+   └──────────── Subred 10.5.5.0/24 ────────────────┘
+      10.5.5.1    Router / Gateway (HTTP/HTTPS)
+      10.5.5.100  Cobot Controller (NIC principal)
+      10.5.5.101  PC EcoStruxure Cobot Expert (OPC-UA 4840)
+      10.5.5.200  Raspberry Pi (eth0, IP secundaria)
 ```
+
+### Tabla de IPs
+
+**Subred 192.168.1.0/24 (red principal / PLC)**
+
+| IP | Componente | Puertos |
+|---|---|---|
+| 192.168.1.1 | Router / Gateway | HTTP |
+| 192.168.1.50 | PLC Schneider TM262-15 | HTTP, HTTPS |
+| 192.168.1.167 | Raspberry Pi (eth0) | SSH, VNC, Backend :8000 |
+| 192.168.1.252 | Cobot Controller (2ª NIC) | 6502, 10001, 2121 |
+
+**Subred 10.5.5.0/24 (red del cobot)**
+
+| IP | Componente | Puertos |
+|---|---|---|
+| 10.5.5.1 | Router / Gateway | HTTP, HTTPS |
+| 10.5.5.100 | Cobot Controller (NIC principal) | 6502, 10001, 2121 |
+| 10.5.5.101 | PC EcoStruxure Cobot Expert | OPC-UA 4840, HTTP |
+| 10.5.5.200 | Raspberry Pi (eth0 secundaria) | SSH, VNC, Backend :8000 |
+
+### Puertos del Cobot Controller (10.5.5.100)
+
+```
+6502   → Modbus TCP (lectura, FC04)
+10000  → Estado JSON en tiempo real (TLS)
+10001  → Comandos JSON (TLS) ← CONTROL (movimiento + gripper)
+2121   → FTP (programas, requiere TLS)
+```
+
+Identificación del cobot (broadcast UDP): `LexiumCobot`, serial `8A24176JKA00007`, modelo `LXMRL03S0000`.
 
 ---
 
