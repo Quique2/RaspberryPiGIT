@@ -27,6 +27,10 @@ CMD_PORT    = 10001  # send commands here (TLS)
 STATUS_PORT = 10000  # robot streams status here (TLS)
 TIMEOUT     = 5.0
 
+# Magnetic gripper wired to cabinet CN2 DO6 → dout index 5 (0-based)
+GRIPPER_INDEX   = 5
+GRIPPER_IO_TYPE = 0   # 0 = cabinet
+
 def _tls_context() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
@@ -60,6 +64,7 @@ class CobotController:
         self.cmd_port = cmd_port
         self._sock: socket.socket | None = None
         self._lock = threading.Lock()
+        self.last_gripper_closed: bool = False
 
     # ------------------------------------------------------------------
     # Connection
@@ -211,6 +216,38 @@ class CobotController:
         """Set global speed override (1-100%)."""
         percent = max(1.0, min(100.0, percent))
         return self._ok(self._send({"cmdName": "set_rapidrate", "rapidrate": percent}))
+
+    # ------------------------------------------------------------------
+    # Digital output / gripper
+    # ------------------------------------------------------------------
+    def set_digital_output(self, index: int, value: bool, io_type: int = 0) -> MoveResult:
+        """
+        Set a digital output.
+        io_type: 0=cabinet, 1=tool end, 2=extend
+        index:   0-based channel (DO6 on cabinet = index 5)
+        """
+        cmd = {
+            "cmdName": "set_digital_output",
+            "type":    io_type,
+            "index":   index,
+            "value":   1 if value else 0,
+        }
+        result = self._ok(self._send(cmd))
+        if result.success:
+            log.info("DO[type=%d,idx=%d] = %d", io_type, index, int(value))
+        else:
+            log.warning("set_digital_output failed: [%d] %s", result.error_code, result.error_msg)
+        return result
+
+    def set_gripper(self, closed: bool) -> MoveResult:
+        """
+        Magnetic gripper on cabinet DO6 (index 5).
+        closed=True energizes the magnet (grabs), False releases.
+        """
+        result = self.set_digital_output(GRIPPER_INDEX, closed, io_type=GRIPPER_IO_TYPE)
+        if result.success:
+            self.last_gripper_closed = closed
+        return result
 
 
 # ---------------------------------------------------------------------------

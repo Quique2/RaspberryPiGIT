@@ -114,6 +114,7 @@ def _demo_snapshot() -> dict:
             "torque_rx_nm": 0.0, "torque_ry_nm": 0.0, "torque_rz_nm": 0.0,
         },
         "joint_temperatures_c": [33, 34, 32, 35, 36, 38],
+        "gripper": {"closed": False, "do_index": 6},
     }
 
 
@@ -150,6 +151,7 @@ async def modbus_poll_loop() -> None:
             while True:
                 snap = await asyncio.get_event_loop().run_in_executor(None, read_cobot, client)
                 snap["timestamp"] = datetime.now().isoformat()
+                snap["gripper"] = {"closed": controller.last_gripper_closed, "do_index": 6}
                 state.broadcast(snap)
                 await asyncio.sleep(POLL_INTERVAL)
 
@@ -295,6 +297,16 @@ async def enable():
 async def disable():
     try:
         return _resp(await asyncio.to_thread(_ensure().disable_robot))
+    except Exception as e:
+        return {"ok": False, "errorCode": "-1", "error": f"gateway: {e}"}
+
+class GripperCmd(BaseModel):
+    closed: bool   # True = imán activado (agarra), False = suelta
+
+@app.post("/api/cobot/gripper")
+async def gripper(cmd: GripperCmd):
+    try:
+        return _resp(await asyncio.to_thread(_ensure().set_gripper, cmd.closed))
     except Exception as e:
         return {"ok": False, "errorCode": "-1", "error": f"gateway: {e}"}
 
