@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*.json
+!package.json
+node_modules/
+*.zip
+*.log
+*.pem
+schneider-rpi-control/
